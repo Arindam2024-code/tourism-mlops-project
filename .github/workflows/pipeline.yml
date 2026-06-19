@@ -1,0 +1,77 @@
+name: Tourism Package MLOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  register-dataset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+      - name: Install Dependencies
+        run: pip install huggingface_hub==0.32.6 pandas==2.2.2
+      - name: Upload Dataset to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        run: python tourism_project/model_building/data_register.py
+
+  data-prep:
+    needs: register-dataset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+      - name: Install Dependencies
+        run: pip install huggingface_hub==0.32.6 pandas==2.2.2 scikit-learn==1.6.0
+      - name: Run Data Preparation
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        run: python tourism_project/model_building/prep.py
+
+  model-training:
+    needs: data-prep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+      - name: Install Dependencies
+        run: |
+          pip install huggingface_hub==0.32.6 pandas==2.2.2 scikit-learn==1.6.0 xgboost==2.1.4 joblib==1.5.1 mlflow==3.0.1
+      - name: Start MLflow Server
+        run: |
+          nohup mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri ./mlruns --default-artifact-root ./mlartifacts &
+          sleep 8
+      - name: Train and Register Model
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          MLFLOW_TRACKING_URI: http://localhost:5000
+        run: python tourism_project/model_building/train.py
+
+  deploy-hosting:
+    needs: [register-dataset, data-prep, model-training]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+      - name: Install Dependencies
+        run: pip install huggingface_hub==0.32.6
+      - name: Push to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        run: python tourism_project/hosting/hosting.py
